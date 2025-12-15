@@ -1,17 +1,17 @@
 import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
-import type { Building, Tenant } from "@/lib/types";
+import type { Building, Tenant, Room } from "@/lib/types"; 
 
 type Props = {
   params: { buildingId: string };
 };
 
-export default async function BuildingDetailPage({ params }: Props) {
-  const buildingId = params.buildingId;
-
-  // Get building
+export default async function BuildingDetailPage(props: Props) {
+  const buildingId = props.params.buildingId;
+    
+  // FIX: Removed <Building> generic from .from()
   const { data: buildingRows } = await supabase
-    .from<Building>("buildings")
+    .from("buildings")
     .select("*")
     .eq("id", buildingId);
 
@@ -31,20 +31,36 @@ export default async function BuildingDetailPage({ params }: Props) {
     );
   }
 
-  // Get tenants for this building
+  // FIX: Removed <Tenant> generic from .from()
   const { data: tenants } = await supabase
-    .from<Tenant>("tenants")
-    .select("*")
+    .from("tenants")
+    .select("*, room:rooms(room_number)") // Fetch room_number via join
     .eq("building_id", buildingId)
-    .order("room_number", { ascending: true });
+    .order("name", { ascending: true });
 
-  const tenantList = tenants ?? [];
+  const tenantList = tenants
+    ? tenants.map((t: any) => ({
+        ...t,
+        room_number: t.room?.room_number || "N/A", // Map the joined room_number
+      }))
+    : [];
+
   const tenantCount = tenantList.length;
   const totalMonthly =
     tenantList.reduce(
-      (sum, t) => sum + (t.rent ?? 0) + (t.maintenance ?? 0),
+      (sum, t: any) => sum + (t.rent ?? 0) + (t.maintenance ?? 0),
       0
     ) ?? 0;
+  
+  // FIX: Removed <Room> generic from .from()
+  const { data: rooms } = await supabase
+    .from("rooms")
+    .select("id, room_number, is_occupied")
+    .eq("building_id", buildingId)
+    .order("room_number", { ascending: true });
+
+  const roomList = rooms ?? [];
+  const roomCount = roomList.length;
 
   return (
     <div className="space-y-6">
@@ -75,82 +91,93 @@ export default async function BuildingDetailPage({ params }: Props) {
       {/* Stats for this building */}
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <div className="rounded-xl bg-white p-4 shadow-sm">
-          <p className="text-xs text-zinc-500">Tenants</p>
-          <p className="mt-1 text-xl font-semibold text-zinc-900">
-            {tenantCount}
+          <p className="text-xs text-zinc-500">Total Units</p>
+          <p className="mt-1 text-2xl font-semibold text-zinc-900">
+            {roomCount}
           </p>
         </div>
         <div className="rounded-xl bg-white p-4 shadow-sm">
-          <p className="text-xs text-zinc-500">Monthly rent + maint.</p>
+          <p className="text-xs text-zinc-500">Monthly Potential</p>
           <p className="mt-1 text-lg font-semibold text-zinc-900">
             ₹{totalMonthly.toLocaleString()}
           </p>
         </div>
-        <div className="rounded-xl bg-white p-4 shadow-sm flex items-center justify-center">
+        {/* ADD ROOM AND TENANT LINK */}
+        <div className="rounded-xl bg-white p-4 shadow-sm flex flex-col justify-center gap-1">
           <Link
-            href={`/management/buildings/${buildingId}/add-tenant`}
+            href={`/management/buildings/${buildingId}/add-room`}
+            className="inline-flex items-center justify-center rounded-lg bg-zinc-200 px-4 py-2 text-xs font-medium text-zinc-800 hover:bg-zinc-300"
+          >
+            + Add New Room
+          </Link>
+           <Link
+            href={`/management/tenant/create?buildingId=${building.id}`}
             className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2 text-xs font-medium text-white hover:bg-zinc-800"
           >
-            + Add Tenant
+            + Add New Tenant
           </Link>
         </div>
       </section>
 
-      {/* Tenants list */}
+      {/* Units & Occupancy List */}
       <section className="space-y-3">
         <div className="flex items-center justify-between">
-          <p className="text-sm font-medium text-zinc-700">Tenants</p>
-          {tenantCount > 0 && (
-            <p className="text-xs text-zinc-500">
-              {tenantCount} tenant{tenantCount !== 1 && "s"}
-            </p>
-          )}
-        </div>
-
-        {tenantList.length === 0 && (
+          <p className="text-sm font-medium text-zinc-700">Units & Occupancy</p>
           <p className="text-xs text-zinc-500">
-            No tenants yet for this building. Click &ldquo;Add Tenant&rdquo; to
-            create one.
+              {tenantCount} occupied / {roomCount} total
+          </p>
+        </div>
+        
+        {roomList.length === 0 && (
+          <p className="text-xs text-zinc-500">
+            No rooms/units created yet. Click &ldquo;+ Add New Room&rdquo;.
           </p>
         )}
 
         <div className="space-y-3">
-          {tenantList.map((t) => (
-            <div
-              key={t.id}
-              className="rounded-xl bg-white p-4 shadow-sm flex items-start justify-between"
-            >
-              <div className="space-y-1">
-                <p className="text-sm font-semibold text-zinc-900">
-                  {t.name}
-                </p>
-                <p className="text-xs text-zinc-500">
-                  Room {t.room_number}
-                </p>
-                <p className="text-xs text-zinc-500">
-                  Rent: ₹{t.rent.toLocaleString()} • Maintenance: ₹
-                  {t.maintenance.toLocaleString()}
-                </p>
-                <p className="text-[11px] text-zinc-400">
-                  Advance: ₹{t.advance_paid.toLocaleString()}
-                </p>
-                {t.agreement_start && t.agreement_end && (
-                  <p className="text-[11px] text-zinc-400">
-                    {t.agreement_start} → {t.agreement_end}
-                  </p>
-                )}
-              </div>
-              <div className="text-right">
-                <p className="text-[10px] text-zinc-500 mb-1">Login</p>
-                <p className="text-[11px] font-mono text-zinc-700">
-                  {t.username}
-                </p>
-                <p className="mt-1 text-[11px] text-zinc-400">
-                  (auto-generated)
-                </p>
-              </div>
-            </div>
-          ))}
+          {roomList.map((room) => {
+            // Find the tenant linked to this room
+            const tenant = tenantList.find((t: any) => t.room_id === room.id);
+
+            return (
+              <Link
+                key={room.id}
+                // Link to tenant edit page if occupied, or link to tenant creation with pre-selected room
+                href={tenant 
+                    ? `/management/tenant/${tenant.id}` 
+                    : `/management/tenant/create?buildingId=${building.id}&roomId=${room.id}`
+                }
+                className={`block rounded-xl p-4 shadow-sm transition-colors ${
+                  tenant
+                    ? "bg-white hover:bg-zinc-50"
+                    : "bg-green-50 hover:bg-green-100 border border-green-200"
+                }`}
+              >
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-zinc-900">
+                      Room {room.room_number}
+                    </p>
+                    <p className={`mt-1 text-xs ${tenant ? 'text-zinc-500' : 'text-green-600 font-medium'}`}>
+                      {tenant ? (
+                        <>Tenant: {tenant.name}</>
+                      ) : (
+                        "Vacant - Click to add tenant"
+                      )}
+                    </p>
+                    {tenant && (
+                      <p className="text-[11px] text-zinc-400">
+                        Rent: ₹{tenant.rent.toLocaleString()} • Maint: ₹{tenant.maintenance.toLocaleString()}
+                      </p>
+                    )}
+                  </div>
+                  <span className={`rounded-full px-2 py-1 text-[10px] uppercase tracking-wide font-medium ${tenant ? 'bg-red-100 text-red-700' : 'bg-green-200 text-green-800'}`}>
+                    {tenant ? "Occupied" : "Vacant"}
+                  </span>
+                </div>
+              </Link>
+            );
+          })}
         </div>
       </section>
     </div>

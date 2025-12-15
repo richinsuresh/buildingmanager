@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
 import type { Tenant, Payment } from "@/lib/types";
 import { getPendingAmount } from "@/lib/payments";
@@ -12,10 +13,11 @@ export default async function TenantDashboardPage() {
     redirect("/login/tenant");
   }
 
+  // Fetch tenant, joining with rooms for room_number
   const [{ data: tenant }, { data: payments }] = await Promise.all([
     supabase
       .from<Tenant>("tenants")
-      .select("*")
+      .select("*, room:rooms(room_number)")
       .eq("id", tenantId)
       .maybeSingle(),
     supabase
@@ -25,30 +27,157 @@ export default async function TenantDashboardPage() {
       .order("paid_at", { ascending: false }),
   ]);
 
-  if (!tenant) {
+  if (!tenant || !tenant.room) {
     redirect("/login/tenant");
   }
+  
+  const { name, rent, maintenance, advance_paid, agreement_start, agreement_end } = tenant;
+  const room_number = tenant.room.room_number;
 
   const paymentList = payments ?? [];
   const pending = getPendingAmount(
-    tenant.rent,
-    tenant.maintenance,
+    rent,
+    maintenance,
     paymentList
   );
+  
+  const monthlyTotal = rent + maintenance;
 
   return (
-    <div className="min-h-screen bg-zinc-50 px-4 py-4 dark:bg-black">
+    <div className="min-h-screen space-y-6">
       <header className="mb-4">
         <p className="text-xs text-zinc-500">Welcome</p>
-        <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
-          {tenant.name}
+        <h1 className="text-2xl font-semibold text-zinc-900">
+          {name}
         </h1>
-        <p className="text-xs text-zinc-500">
-          Room {tenant.room_number}
+        <p className="text-sm text-zinc-500">
+          Room {room_number}
         </p>
+        <Link 
+            href="/"
+            // This is a client-side click handler for a clean logout flow
+            onClick={() => {
+                document.cookie = "tenantId=; path=/; max-age=0";
+                document.cookie = "role=; path=/; max-age=0";
+            }}
+            className="text-xs text-red-500 underline mt-1 block"
+        >
+            Logout
+        </Link>
       </header>
 
-      {/* same UI as before, but using tenant + pending + paymentList */}
+      {/* --- Pending Amount & Pay Option --- */}
+      <section className="rounded-xl bg-white p-5 shadow-lg border border-red-100">
+        <p className="text-xs font-semibold uppercase text-red-500 mb-2">
+          Current Pending Dues
+        </p>
+        <p className="text-4xl font-extrabold text-zinc-900">
+          ₹{pending.toLocaleString("en-IN")}
+        </p>
+        <p className="text-sm text-zinc-500 mt-1">
+          Amount pending for the current month. Total due: ₹{monthlyTotal.toLocaleString("en-IN")}
+        </p>
+
+        {/* Payment Button: Links to Stripe Checkout API */}
+        <form action="/api/payments/initiate" method="POST">
+            <input type="hidden" name="tenantId" value={tenantId} />
+            <input type="hidden" name="amount" value={pending} />
+            <button
+              type="submit"
+              className="mt-4 w-full rounded-lg bg-green-600 py-3 text-sm font-bold text-white shadow-md hover:bg-green-700 transition-colors disabled:bg-gray-400"
+              disabled={pending <= 0}
+            >
+              {pending > 0 ? `Pay ₹${pending.toLocaleString("en-IN")} Now` : "Paid for this month! Thank you."}
+            </button>
+        </form>
+      </section>
+
+      {/* --- Tenant Details (Profile) --- */}
+      <section className="space-y-4">
+        {/* Monthly Charges */}
+        <div className="rounded-xl bg-white p-4 shadow-sm">
+          <p className="text-xs font-semibold uppercase text-zinc-500 mb-2">
+            Monthly Charges
+          </p>
+          <div className="space-y-1 text-sm">
+            <div className="flex justify-between">
+              <span className="text-zinc-700">Rent:</span>
+              <span className="font-medium">₹{rent.toLocaleString("en-IN")}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-zinc-700">Maintenance:</span>
+              <span className="font-medium">₹{maintenance.toLocaleString("en-IN")}</span>
+            </div>
+          </div>
+          <div className="mt-3 pt-3 border-t border-zinc-100 flex justify-between text-xs text-zinc-500">
+            <span>Advance Paid (Deposit):</span>
+            <span>₹{advance_paid.toLocaleString("en-IN")}</span>
+          </div>
+        </div>
+
+        {/* Agreement Details */}
+        <div className="rounded-xl bg-white p-4 shadow-sm">
+          <p className="text-xs font-semibold uppercase text-zinc-500 mb-2">
+            Agreement Details
+          </p>
+          <div className="space-y-1 text-sm">
+            <div className="flex justify-between">
+              <span className="text-zinc-700">Start Date:</span>
+              <span className="font-medium">{agreement_start || "N/A"}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-zinc-700">End Date:</span>
+              <span className="font-medium">{agreement_end || "N/A"}</span>
+            </div>
+          </div>
+        </div>
+        
+        {/* Link to new documents page */}
+        <div className="rounded-xl bg-white p-4 shadow-sm text-center">
+            <Link 
+                href="/tenant/documents" 
+                className="text-sm font-medium text-zinc-600 hover:text-zinc-900 underline"
+            >
+                View Agreement and Documents →
+            </Link>
+        </div>
+      </section>
+
+      {/* --- Payment History --- */}
+      <section className="space-y-3 pt-4">
+        <h2 className="text-lg font-semibold text-zinc-900">
+          Payment History
+        </h2>
+        {paymentList.length === 0 ? (
+          <p className="text-sm text-zinc-500">No payments found.</p>
+        ) : (
+          <div className="space-y-2">
+            {paymentList.slice(0, 5).map((p) => (
+              <div
+                key={p.id}
+                className="rounded-lg bg-white p-3 shadow-sm flex justify-between items-center"
+              >
+                <div>
+                  <p className="text-sm font-medium">
+                    ₹{p.amount.toLocaleString("en-IN")}
+                  </p>
+                  <p className="text-[10px] text-zinc-400">
+                    {new Date(p.paid_at).toLocaleDateString()}
+                  </p>
+                </div>
+                <span className="text-xs rounded-full px-2 py-0.5 bg-zinc-100 text-zinc-600">
+                  {p.method}
+                </span>
+              </div>
+            ))}
+            {paymentList.length > 5 && (
+                 <p className="text-center text-xs text-zinc-500 mt-2">
+                    ... and {paymentList.length - 5} more transactions
+                </p>
+            )}
+          </div>
+        )}
+      </section>
     </div>
   );
 }

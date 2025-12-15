@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
+// FIX: Import the exported 'supabase' constant instead of the non-existent function
+import { supabase } from "@/lib/supabaseClient"; 
 import Link from "next/link";
 
 type TenantRow = {
@@ -28,7 +29,8 @@ export default function TenantsPage() {
 
   useEffect(() => {
     const load = async () => {
-      const supabase = getSupabaseBrowserClient();
+      // FIX: Use the directly imported 'supabase' constant
+      // const supabase = getSupabaseBrowserClient(); 
 
       const {
         data: { user },
@@ -100,7 +102,7 @@ export default function TenantsPage() {
 
           {tenants.map((t) => (
             <Link
-              href={`/management/tenants/${t.id}`}
+              href={`/management/tenant/${t.id}`}
               key={t.id}
               className="border rounded-lg px-3 py-2 text-sm flex flex-col gap-1"
             >

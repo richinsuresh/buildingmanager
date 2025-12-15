@@ -25,11 +25,22 @@ export type TenantDocument = {
   created_at: string;
 };
 
+// NEW: Separate model for Room/Unit linked to a Building
+export type Room = {
+  id: string;
+  building_id: string; // Foreign key to Building
+  room_number: string; // e.g. "A-101"
+  is_occupied: boolean; // Flag to check occupancy status
+  created_at: string;
+};
+
+// UPDATED: Tenant now links to a Room via room_id (and the form uses 'name' and 'phone')
 export type Tenant = {
   id: string;
-  building_id: string;
+  building_id: string; // Foreign key to Building
+  room_id: string; // NEW: Foreign key to Room
   name: string;
-  room_number: string;
+  phone: string | null;
   username: string;
   password: string;
   rent: number;
@@ -44,4 +55,5 @@ export type TenantWithExtras = Tenant & {
   building?: Building | null;
   payments?: Payment[];
   documents?: TenantDocument[];
+  room_number?: string; // For convenient display after a database join
 };

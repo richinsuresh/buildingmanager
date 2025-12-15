@@ -7,10 +7,7 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: path.resolve(__dirname)
   },
-  // You're using the Pages Router (pages/). Ensure appDir is disabled.
-  experimental: {
-    appDir: false
-  },
+  // Removed: 'experimental.appDir' as it is obsolete/invalid when using the App Router.
   reactStrictMode: true
 };
 

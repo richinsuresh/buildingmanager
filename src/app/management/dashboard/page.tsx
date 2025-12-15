@@ -6,10 +6,10 @@ export default async function ManagementDashboardPage() {
   // Load buildings + tenants from Supabase
   const [{ data: buildings }, { data: tenants }] = await Promise.all([
     supabase
-      .from<Building>("buildings")
+      .from("buildings") // FIX: Removed <Building> generic
       .select("*")
       .order("name", { ascending: true }),
-    supabase.from<Tenant>("tenants").select("*"),
+    supabase.from("tenants").select("*"), // FIX: Removed <Tenant> generic
   ]);
 
   const buildingCount = buildings?.length ?? 0;
@@ -17,7 +17,7 @@ export default async function ManagementDashboardPage() {
 
   const totalMonthlyRent =
     tenants?.reduce(
-      (sum, t) => sum + (t.rent ?? 0) + (t.maintenance ?? 0),
+      (sum, t: any) => sum + (t.rent ?? 0) + (t.maintenance ?? 0),
       0
     ) ?? 0;
 
@@ -70,7 +70,7 @@ export default async function ManagementDashboardPage() {
           </Link>
         </div>
 
-        {(buildings ?? []).map((b) => (
+        {(buildings ?? []).map((b: any) => (
           <Link
             key={b.id}
             href={`/management/buildings/${b.id}`}
