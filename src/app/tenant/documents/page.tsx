@@ -14,7 +14,7 @@ export default async function TenantDocumentsPage() {
 
   // NOTE: Assuming your 'tenant_documents' table is correctly set up with RLS
   const { data: documents, error } = await supabase
-    .from<TenantDocument>("tenant_documents")
+    .from("tenant_documents") // FIXED: Removed <TenantDocument> generic
     .select("*")
     .eq("tenant_id", tenantId)
     .order("created_at", { ascending: false });

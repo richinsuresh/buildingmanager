@@ -4,7 +4,7 @@ import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
-import type { Tenant } from "@/lib/types";
+import type { Tenant } from "@/lib/types"; // Tenant type is likely needed here
 
 export default function TenantLoginPage() {
   const router = useRouter();
@@ -16,36 +16,57 @@ export default function TenantLoginPage() {
     e.preventDefault();
     setError("");
 
-    const { data, error: dbError } = await supabase
-      // FIX: Removed the generic type <Tenant> to resolve the "Expected 2 type arguments" error
-      .from("tenants")
-      .select("id, username, password")
-      .eq("username", username.trim())
-      .maybeSingle();
+    try {
+      if (!username.trim() || !password.trim()) {
+        setError("Please enter both username and password.");
+        return;
+      }
 
-    if (dbError) {
-      console.error(dbError);
-      setError("Something went wrong. Try again.");
-      return;
+      // 1. Fetch tenant data based on username
+      const { data, error: dbError } = await supabase
+        .from("tenants")
+        .select("id, username, password")
+        .eq("username", username.trim())
+        .maybeSingle();
+
+      if (dbError) {
+        console.error("Database Error:", dbError);
+        setError("Login failed due to a database error.");
+        return;
+      }
+
+      if (!data) {
+        setError("Tenant not found. Check your username.");
+        return;
+      }
+
+      // 2. Check password (Simple comparison since you are storing plaintext passwords)
+      if (data.password !== password.trim()) {
+        setError("Incorrect password.");
+        return;
+      }
+
+      // 3. Set cookies for middleware
+      // We use document.cookie for maximum compatibility in this environment
+      if (typeof document !== "undefined") {
+        const expires = new Date(Date.now() + 86400 * 1000).toUTCString(); // 1 day expiry
+
+        document.cookie = `role=tenant; path=/; expires=${expires}`;
+        document.cookie = `tenantId=${data.id}; path=/; expires=${expires}`;
+        
+        // Ensure the browser registers the cookie change immediately
+        // (Though Next.js middleware relies on server-side cookies, setting client-side 
+        // can sometimes help with instant page transitions/redirects)
+      }
+      
+      // 4. Redirect to dashboard
+      // Use router.replace to prevent going back to the login page
+      router.replace("/tenant/dashboard");
+
+    } catch (err: any) {
+      console.error("Login Submission Error:", err);
+      setError("An unexpected error occurred during login.");
     }
-
-    if (!data) {
-      setError("Tenant not found. Check your username.");
-      return;
-    }
-
-    if (data.password !== password.trim()) {
-      setError("Incorrect password.");
-      return;
-    }
-
-    // set cookies for middleware
-    if (typeof document !== "undefined") {
-      document.cookie = "role=tenant; path=/";
-      document.cookie = `tenantId=${data.id}; path=/`;
-    }
-
-    router.replace("/tenant/dashboard");
   };
 
   return (

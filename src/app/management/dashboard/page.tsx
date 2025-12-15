@@ -6,10 +6,10 @@ export default async function ManagementDashboardPage() {
   // Load buildings + tenants from Supabase
   const [{ data: buildings }, { data: tenants }] = await Promise.all([
     supabase
-      .from("buildings") // FIX: Removed <Building> generic
+      .from("buildings") // FIXED: Removed <Building> generic
       .select("*")
       .order("name", { ascending: true }),
-    supabase.from("tenants").select("*"), // FIX: Removed <Tenant> generic
+    supabase.from("tenants").select("*"), // FIXED: Removed <Tenant> generic
   ]);
 
   const buildingCount = buildings?.length ?? 0;

@@ -1,66 +1,115 @@
+"use client";
+
 import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
 import type { Building, Tenant, Room } from "@/lib/types"; 
+import { useParams } from "next/navigation";
+import { useEffect, useState, useCallback } from "react";
 
-type Props = {
-  params: { buildingId: string };
-};
+// Define the shape of the data needed for rendering
+type TenantDisplay = Tenant & { room_number: string; };
 
-export default async function BuildingDetailPage(props: Props) {
-  const buildingId = props.params.buildingId;
+export default function BuildingDetailPage() {
+  const params = useParams();
+  const buildingId = params.buildingId as string;
+
+  const [building, setBuilding] = useState<Building | null>(null);
+  const [tenantList, setTenantList] = useState<TenantDisplay[]>([]);
+  const [roomList, setRoomList] = useState<Room[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  
+  // Function to fetch all necessary data using the component's state (Client-side)
+  const loadData = useCallback(async (id: string) => {
+    setLoading(true);
+    setError(null);
     
-  // FIX: Removed <Building> generic from .from()
-  const { data: buildingRows } = await supabase
-    .from("buildings")
-    .select("*")
-    .eq("id", buildingId);
+    try {
+        // 1. Fetch building details
+        const { data: buildingRows } = await supabase
+            .from("buildings")
+            .select("*")
+            .eq("id", id);
 
-  const building = buildingRows?.[0] ?? null;
+        const fetchedBuilding = buildingRows?.[0] ?? null;
 
-  if (!building) {
+        if (!fetchedBuilding) {
+            setError("Building not found.");
+            setLoading(false);
+            return;
+        }
+        setBuilding(fetchedBuilding as Building);
+
+        // 2. Fetch tenants and rooms concurrently
+        const [{ data: tenants }, { data: rooms }] = await Promise.all([
+            // FIXED: Removed generics from .from()
+            supabase
+                .from("tenants")
+                .select("*, room:rooms(room_number)")
+                .eq("building_id", id)
+                .order("name", { ascending: true }),
+            supabase
+                .from("rooms")
+                .select("id, room_number, is_occupied")
+                .eq("building_id", id)
+                .order("room_number", { ascending: true }),
+        ]);
+
+        const processedTenants = (tenants ?? []).map((t: any) => ({
+            ...t,
+            room_number: t.room?.room_number || "N/A",
+        })) as TenantDisplay[];
+
+        setTenantList(processedTenants);
+        setRoomList(rooms ?? []);
+
+    } catch (err: any) {
+        console.error("Data Fetch Error:", err);
+        setError(err.message || "Failed to load data. Check Supabase RLS.");
+    } finally {
+        setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    // Only run data fetching when we have a valid building ID from the URL params
+    if (buildingId) {
+        loadData(buildingId);
+    }
+  }, [buildingId, loadData]);
+
+
+  if (loading) {
     return (
-      <div className="min-h-screen px-4 py-6">
-        <p className="text-sm text-red-600">Building not found.</p>
-        <Link
-          href="/management/dashboard"
-          className="mt-2 inline-block text-xs text-zinc-600 underline"
-        >
-          ← Back to dashboard
-        </Link>
-      </div>
+        <div className="min-h-screen px-4 py-6">
+            <p className="text-sm text-zinc-500">Loading building details...</p>
+        </div>
     );
   }
 
-  // FIX: Removed <Tenant> generic from .from()
-  const { data: tenants } = await supabase
-    .from("tenants")
-    .select("*, room:rooms(room_number)") // Fetch room_number via join
-    .eq("building_id", buildingId)
-    .order("name", { ascending: true });
-
-  const tenantList = tenants
-    ? tenants.map((t: any) => ({
-        ...t,
-        room_number: t.room?.room_number || "N/A", // Map the joined room_number
-      }))
-    : [];
-
+  // --- Display Error State (Including "Building not found") ---
+  if (error) {
+    return (
+        <div className="min-h-screen px-4 py-6">
+            <p className="text-sm text-red-600">{error}</p>
+            <Link
+                href="/management/dashboard"
+                className="mt-2 inline-block text-xs text-zinc-600 underline"
+            >
+                ← Back to dashboard
+            </Link>
+        </div>
+    );
+  }
+  
+  // --- Calculations for UI ---
   const tenantCount = tenantList.length;
+  const roomCount = roomList.length;
   const totalMonthly =
     tenantList.reduce(
       (sum, t: any) => sum + (t.rent ?? 0) + (t.maintenance ?? 0),
       0
     ) ?? 0;
-  
-  // FIX: Removed <Room> generic from .from()
-  const { data: rooms } = await supabase
-    .from("rooms")
-    .select("id, room_number, is_occupied")
-    .eq("building_id", buildingId)
-    .order("room_number", { ascending: true });
-
-  const roomList = rooms ?? [];
-  const roomCount = roomList.length;
 
   return (
     <div className="space-y-6">
@@ -76,15 +125,15 @@ export default async function BuildingDetailPage(props: Props) {
             </Link>
           </p>
           <h1 className="text-2xl font-semibold text-zinc-900">
-            {building.name}
+            {building!.name}
           </h1>
-          {building.address && (
-            <p className="mt-1 text-sm text-zinc-600">{building.address}</p>
+          {building!.address && (
+            <p className="mt-1 text-sm text-zinc-600">{building!.address}</p>
           )}
         </div>
 
         <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-medium uppercase tracking-wide text-zinc-700">
-          {building.code}
+          {building!.code}
         </span>
       </header>
 
@@ -111,7 +160,7 @@ export default async function BuildingDetailPage(props: Props) {
             + Add New Room
           </Link>
            <Link
-            href={`/management/tenant/create?buildingId=${building.id}`}
+            href={`/management/tenant/create?buildingId=${buildingId}`}
             className="inline-flex items-center justify-center rounded-lg bg-zinc-900 px-4 py-2 text-xs font-medium text-white hover:bg-zinc-800"
           >
             + Add New Tenant
@@ -145,7 +194,7 @@ export default async function BuildingDetailPage(props: Props) {
                 // Link to tenant edit page if occupied, or link to tenant creation with pre-selected room
                 href={tenant 
                     ? `/management/tenant/${tenant.id}` 
-                    : `/management/tenant/create?buildingId=${building.id}&roomId=${room.id}`
+                    : `/management/tenant/create?buildingId=${buildingId}&roomId=${room.id}`
                 }
                 className={`block rounded-xl p-4 shadow-sm transition-colors ${
                   tenant

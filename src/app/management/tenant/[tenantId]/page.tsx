@@ -12,15 +12,18 @@ type FullTenantData = Tenant & {
   room_number: string;
 };
 
+// FIX: Explicitly omit ALL non-editable or redefined fields, INCLUDING 'room_id'.
 type TenantFormState = Omit<
   Tenant,
-  "id" | "building_id" | "created_at" | "username" | "password" | "room_number" | "phone"
+  "id" | "building_id" | "room_id" | "created_at" | "username" | "password" | "room_number" | "phone" | "rent" | "maintenance" | "advance_paid"
 > & {
+  // Redefine as strings for form inputs
   rent: string;
   maintenance: string;
   advance_paid: string;
+  // Other properties
   room_number: string;
-  phone: string; // Add phone to state
+  phone: string;
 };
 
 // --- Record Payment Form Component (No change) ---
@@ -199,8 +202,8 @@ export default function TenantDetailPage() {
     
     const initialData: FullTenantData = {
       ...tenant,
-      room_number: tenant.room?.room_number || "N/A",
-      documents: tenant.documents || [],
+      room_number: (tenant as any).room?.room_number || "N/A",
+      documents: (tenant as any).documents || [],
     } as unknown as FullTenantData;
     
     setTenantData(initialData);
