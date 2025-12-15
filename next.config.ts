@@ -1,8 +1,17 @@
-import type { NextConfig } from "next";
+import path from 'path';
+import { NextConfig } from 'next';
 
+/** @type {NextConfig} */
 const nextConfig: NextConfig = {
-  /* config options here */
-  reactCompiler: true,
+  // Force Turbopack to use this folder as the project root
+  turbopack: {
+    root: path.resolve(__dirname)
+  },
+  // You're using the Pages Router (pages/). Ensure appDir is disabled.
+  experimental: {
+    appDir: false
+  },
+  reactStrictMode: true
 };
 
 export default nextConfig;
