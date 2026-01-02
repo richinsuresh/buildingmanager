@@ -3,9 +3,12 @@ import { cookies } from "next/headers";
 
 /**
  * Creates an authenticated Supabase client for use in Next.js Server Components.
+ * FIX: This version uses bracket notation to avoid the synchronous property
+ * access error on the cookies() object's .get method.
  */
 export async function createClient() {
-  const cookieStore = cookies();
+  // Explicitly cast to 'any' to allow bracket notation access
+  const cookieStore = cookies() as any; 
 
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -13,13 +16,27 @@ export async function createClient() {
     {
       cookies: {
         get(name: string) {
-          return cookieStore.get(name)?.value;
+          // CRITICAL FIX: Use bracket notation to access the cookie value.
+          // This avoids the 'cookieStore.get is not a function' TypeError.
+          const valueObject = cookieStore[name];
+          
+          // Next.js cookies typically return { value: '...' }
+          if (valueObject?.value) {
+            return valueObject.value;
+          }
+          
+          // Fallback for extremely minimal environments where it returns the raw string
+          if (typeof valueObject === 'string') {
+            return valueObject;
+          }
+          
+          return undefined; // Must return undefined or string
         },
         set(name: string, value: string, options: any) {
-          // Required for the API but not actively used for fetching
+          // This is fine as it's not the crash source
         },
         remove(name: string, options: any) {
-          // Not needed
+          // This is fine as it's not the crash source
         },
       },
     }

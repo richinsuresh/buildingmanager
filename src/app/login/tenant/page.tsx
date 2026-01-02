@@ -1,28 +1,28 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
-import type { Tenant } from "@/lib/types"; // Tenant type is likely needed here
 
 export default function TenantLoginPage() {
-  const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError("");
+    setLoading(true);
 
     try {
       if (!username.trim() || !password.trim()) {
         setError("Please enter both username and password.");
+        setLoading(false);
         return;
       }
 
-      // 1. Fetch tenant data based on username
+      // 1. Fetch tenant
       const { data, error: dbError } = await supabase
         .from("tenants")
         .select("id, username, password")
@@ -31,104 +31,108 @@ export default function TenantLoginPage() {
 
       if (dbError) {
         console.error("Database Error:", dbError);
-        setError("Login failed due to a database error.");
+        setError("System error. Please try again later.");
+        setLoading(false);
         return;
       }
 
       if (!data) {
-        setError("Tenant not found. Check your username.");
+        setError("Tenant account not found.");
+        setLoading(false);
         return;
       }
 
-      // 2. Check password (Simple comparison since you are storing plaintext passwords)
+      // 2. Verify password
       if (data.password !== password.trim()) {
         setError("Incorrect password.");
+        setLoading(false);
         return;
       }
 
-      // 3. Set cookies for middleware
-      // We use document.cookie for maximum compatibility in this environment
+      // 3. Set Cookies (Robust Method)
       if (typeof document !== "undefined") {
-        const expires = new Date(Date.now() + 86400 * 1000).toUTCString(); // 1 day expiry
+        // A. Clear any existing cookies first to avoid conflicts
+        document.cookie = "role=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+        document.cookie = "tenantId=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
 
-        document.cookie = `role=tenant; path=/; expires=${expires}`;
-        document.cookie = `tenantId=${data.id}; path=/; expires=${expires}`;
+        // B. Set new cookies
+        const expires = new Date(Date.now() + 86400 * 1000).toUTCString(); // 1 day
+        document.cookie = `role=tenant; path=/; expires=${expires}; SameSite=Lax`;
+        document.cookie = `tenantId=${data.id}; path=/; expires=${expires}; SameSite=Lax`;
         
-        // Ensure the browser registers the cookie change immediately
-        // (Though Next.js middleware relies on server-side cookies, setting client-side 
-        // can sometimes help with instant page transitions/redirects)
+        // C. Force Hard Navigation
+        console.log("Login success. Redirecting to dashboard...");
+        window.location.href = "/tenant/dashboard";
       }
-      
-      // 4. Redirect to dashboard
-      // Use router.replace to prevent going back to the login page
-      router.replace("/tenant/dashboard");
 
-    } catch (err: any) {
-      console.error("Login Submission Error:", err);
-      setError("An unexpected error occurred during login.");
+    } catch (err) {
+      console.error("Login Error:", err);
+      setError("An unexpected error occurred.");
+      setLoading(false);
     }
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 dark:bg-black">
-      <main className="w-full max-w-md rounded-2xl bg-white p-6 shadow-sm dark:bg-zinc-950">
-        <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
-          Tenant Login
-        </h1>
-        <p className="mt-1 text-sm text-zinc-500">
-          Use the username and password given by your building management.
-        </p>
+    <div className="flex min-h-[80vh] items-center justify-center">
+      <div className="w-full max-w-md rounded-2xl bg-white p-8 shadow-sm ring-1 ring-zinc-200">
+        <div className="mb-6 text-center">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-blue-600">
+             <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+             </svg>
+          </div>
+          <h1 className="text-2xl font-bold text-zinc-900">Tenant Portal</h1>
+          <p className="mt-2 text-sm text-zinc-500">Sign in to pay rent and view documents.</p>
+        </div>
 
-        <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-              Username
-            </label>
+            <label className="block text-sm font-medium text-zinc-700">Username</label>
             <input
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm outline-none focus:border-zinc-400 focus:bg-white dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50"
-              placeholder="Room@BuildingCode"
+              disabled={loading}
+              className="mt-1.5 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none transition-all focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:bg-zinc-50"
+              placeholder="e.g. Room-101"
               required
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-              Password
-            </label>
+            <label className="block text-sm font-medium text-zinc-700">Password</label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm outline-none focus:border-zinc-400 focus:bg-white dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50"
+              disabled={loading}
+              className="mt-1.5 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none transition-all focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:bg-zinc-50"
               placeholder="••••••••"
               required
             />
           </div>
 
           {error && (
-            <p className="mt-1 text-sm text-red-500">
+            <div className="rounded-lg bg-red-50 p-3 text-sm text-red-600 ring-1 ring-inset ring-red-500/10">
               {error}
-            </p>
+            </div>
           )}
 
           <button
             type="submit"
-            className="mt-2 flex h-10 w-full items-center justify-center rounded-lg bg-zinc-900 text-sm font-medium text-zinc-50 hover:bg-zinc-800 transition-colors"
+            disabled={loading}
+            className="w-full rounded-lg bg-blue-600 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-blue-700 disabled:opacity-70 disabled:cursor-not-allowed"
           >
-            Login
+            {loading ? "Checking..." : "Login"}
           </button>
         </form>
 
-        <Link
-          href="/"
-          className="mt-4 block text-center text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
-        >
-          ← Back to role selection
-        </Link>
-      </main>
+        <div className="mt-6 text-center">
+          <Link href="/" className="text-sm font-medium text-zinc-500 hover:text-zinc-900">
+            &larr; Back to role selection
+          </Link>
+        </div>
+      </div>
     </div>
   );
 }

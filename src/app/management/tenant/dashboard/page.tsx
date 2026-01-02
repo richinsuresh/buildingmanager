@@ -1,22 +1,18 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
-import Link from "next/link"; // Ensure Link is imported
 
-// Force dynamic rendering so we always check cookies/DB fresh
 export const dynamic = "force-dynamic";
 
 export default async function TenantDashboardPage() {
-  // 1. Get the Tenant ID from the cookie (Simple Auth)
   const cookieStore = await cookies();
   const tenantId = cookieStore.get("tenantId")?.value;
 
-  // 2. If no cookie, redirect to login
   if (!tenantId) {
     redirect("/login/tenant");
   }
 
-  // 3. Fetch tenant data using the ID from the cookie
+  // Fetch tenant details + building info
   const { data: tenant, error } = await supabase
     .from("tenants")
     .select(`
@@ -29,26 +25,16 @@ export default async function TenantDashboardPage() {
     .eq("id", tenantId)
     .single();
 
-  // 4. Handle invalid tenant ID (e.g., cookie exists but tenant deleted)
   if (error || !tenant) {
-    // Ideally clear cookies here, but in a Server Component we can just link to logout
     return (
-      <div className="flex min-h-screen items-center justify-center p-4 text-center">
-        <div>
-          <h1 className="text-xl font-bold text-red-600">Account Not Found</h1>
-          <p className="mt-2 text-zinc-500">We couldn't find your tenant details.</p>
-          <a
-            href="/api/logout"
-            className="mt-4 inline-block rounded bg-zinc-900 px-4 py-2 text-sm text-white hover:bg-zinc-700"
-          >
-            Logout & Try Again
-          </a>
-        </div>
+      <div className="p-8 text-center">
+        <h1 className="text-xl font-bold text-red-600">Error loading profile</h1>
+        <p className="text-zinc-500">Please contact management.</p>
+        <a href="/api/logout" className="mt-4 inline-block text-sm underline">Logout</a>
       </div>
     );
   }
 
-  // 5. Render the Dashboard
   return (
     <div className="min-h-screen bg-zinc-50 pb-10">
       <div className="mx-auto max-w-lg px-4 pt-8">
@@ -75,7 +61,7 @@ export default async function TenantDashboardPage() {
              <span className="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800">
                Active
              </span>
-             <span className="text-xs text-zinc-400">Room {tenant.room_id}</span>
+             <span className="text-xs text-zinc-400">Room {tenant.room_no}</span>
           </div>
 
           <div className="mt-6 text-center">
@@ -109,17 +95,22 @@ export default async function TenantDashboardPage() {
               {new Date(tenant.created_at).toLocaleDateString()}
             </p>
           </div>
-          {/* Helper Component for Links */}
-          <Link
-            href="/tenant/documents"
-            className="flex flex-col items-center justify-center rounded-xl border border-zinc-200 bg-white p-4 transition-colors hover:border-zinc-300 hover:bg-zinc-50"
-          >
-            <span className="text-xl">📄</span>
-            <span className="mt-2 text-sm font-medium text-zinc-900">Documents</span>
-          </Link>
+          <LinkCard href="/tenant/documents" label="Documents" icon="📄" />
         </div>
         
       </div>
     </div>
+  );
+}
+
+function LinkCard({ href, label, icon }: { href: string; label: string; icon: string }) {
+  return (
+    <a
+      href={href}
+      className="flex flex-col items-center justify-center rounded-xl border border-zinc-200 bg-white p-4 transition-colors hover:border-zinc-300 hover:bg-zinc-50"
+    >
+      <span className="text-xl">{icon}</span>
+      <span className="mt-2 text-sm font-medium text-zinc-900">{label}</span>
+    </a>
   );
 }

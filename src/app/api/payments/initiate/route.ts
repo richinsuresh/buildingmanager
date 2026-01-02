@@ -2,10 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
 
 // NOTE: You must set the STRIPE_SECRET_KEY and NEXT_PUBLIC_BASE_URL environment variables.
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
-  // FIX: Cast the apiVersion as 'any' to bypass TypeScript's strict version check
-  apiVersion: '2022-11-15' as any, 
-});
+// FIX: Removed invalid 'apiVersion' override. SDK v20 should use its default (latest) API version.
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string);
 
 // Placeholder function: In a real app, fetch the tenant's actual email from Supabase
 async function getTenantEmail(tenantId: string) {
@@ -58,8 +56,12 @@ export async function POST(req: NextRequest) {
       }
     });
 
+    if (!session.url) {
+      throw new Error("Failed to create Stripe session URL");
+    }
+
     // Redirect user to Stripe Checkout
-    return NextResponse.redirect(session.url!, 303);
+    return NextResponse.redirect(session.url, 303);
     
   } catch (error) {
     console.error('Stripe Checkout Error:', error);
