@@ -5,16 +5,16 @@ import { supabase } from "@/lib/supabaseClient";
 import type { TenantDocument } from "@/lib/types";
 
 export default async function TenantDocumentsPage() {
-  const cookieStore = cookies();
+  // FIX: await cookies() because it returns a Promise in Next.js 15/16
+  const cookieStore = await cookies();
   const tenantId = cookieStore.get("tenantId")?.value;
 
   if (!tenantId) {
     redirect("/login/tenant");
   }
 
-  // NOTE: Assuming your 'tenant_documents' table is correctly set up with RLS
   const { data: documents, error } = await supabase
-    .from("tenant_documents") // FIXED: Removed <TenantDocument> generic
+    .from("tenant_documents")
     .select("*")
     .eq("tenant_id", tenantId)
     .order("created_at", { ascending: false });
@@ -33,7 +33,8 @@ export default async function TenantDocumentsPage() {
     );
   }
 
-  const documentList = documents || [];
+  // FIX: Cast to TenantDocument[] to satisfy TypeScript "implicit any" checks
+  const documentList = (documents || []) as TenantDocument[];
 
   return (
     <div className="min-h-screen space-y-6">

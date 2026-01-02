@@ -1,11 +1,10 @@
 "use client";
 
-import { useEffect, useState, FormEvent, useCallback } from "react";
+import { useEffect, useState, FormEvent, useCallback, Suspense } from "react"; // Added Suspense
 import { useSearchParams } from "next/navigation";
-import { supabase } from "@/lib/supabaseClient"; // FIX: Import the exported 'supabase' constant
+import { supabase } from "@/lib/supabaseClient"; 
 import Link from "next/link";
 
-// Using the newly defined types (assuming they were updated in src/lib/types.ts)
 type Building = {
   id: string;
   name: string;
@@ -18,26 +17,22 @@ type Room = {
 };
 
 function generateTenantCredentials(buildingCode: string, roomNumber: string) {
-  // Generates a simple, predictable username/password
   const username = `${roomNumber}@${buildingCode}`.toLowerCase();
   const password = `pass@${roomNumber}@${buildingCode}`.toLowerCase();
-
   return { username, password };
 }
 
-export default function CreateTenantPage() {
+// 1. Rename your main logic component (NOT exported default)
+function CreateTenantContent() {
   const searchParams = useSearchParams();
   const preSelectedBuildingId = searchParams.get("buildingId");
   const preSelectedRoomId = searchParams.get("roomId");
-
-  // FIX: Removed the non-existent function call: const supabase = getSupabaseBrowserClient(); 
 
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [loadingBuildings, setLoadingBuildings] = useState(true);
   const [loadingRooms, setLoadingRooms] = useState(false);
 
-  // State linked to form inputs, defaulting to URL params
   const [selectedBuildingId, setSelectedBuildingId] = useState(preSelectedBuildingId || "");
   const [selectedRoomId, setSelectedRoomId] = useState(preSelectedRoomId || "");
 
@@ -75,7 +70,7 @@ export default function CreateTenantPage() {
     loadBuildings();
   }, []);
 
-  // Memoized function to load rooms whenever building changes
+  // Memoized function to load rooms
   const loadRooms = useCallback(async (currentBuildingId: string) => {
     if (!currentBuildingId) {
         setRooms([]);
@@ -85,15 +80,15 @@ export default function CreateTenantPage() {
     setLoadingRooms(true);
     setError("");
 
-    // 1. Get all occupied room IDs in this building
+    // 1. Get all occupied room IDs
     const { data: occupiedTenants } = await supabase
         .from("tenants")
         .select("room_id")
         .eq("building_id", currentBuildingId);
         
-    const occupiedRoomIds = occupiedTenants?.map(t => t.room_id) || [];
+    const occupiedRoomIds = occupiedTenants?.map((t: any) => t.room_id) || [];
 
-    // 2. Get all rooms in this building
+    // 2. Get all rooms
     const { data: allRooms, error: roomsError } = await supabase
         .from("rooms")
         .select("id, room_number")
@@ -104,25 +99,21 @@ export default function CreateTenantPage() {
         setError(roomsError.message);
         setRooms([]);
     } else {
-        // Filter the rooms that are not currently occupied
-        const unoccupiedRooms = (allRooms || []).filter(room => !occupiedRoomIds.includes(room.id));
+        const unoccupiedRooms = (allRooms || []).filter((room: any) => !occupiedRoomIds.includes(room.id));
         setRooms(unoccupiedRooms as Room[]);
 
-        // Check if the pre-selected room is available
-        const isPreSelectedRoomAvailable = unoccupiedRooms.some(r => r.id === preSelectedRoomId);
+        const isPreSelectedRoomAvailable = unoccupiedRooms.some((r: any) => r.id === preSelectedRoomId);
 
         if (preSelectedRoomId && isPreSelectedRoomAvailable) {
             setSelectedRoomId(preSelectedRoomId);
         } else {
-            // Reset room selection if the current one is unavailable or no pre-selection
             setSelectedRoomId("");
         }
     }
     setLoadingRooms(false);
-}, [preSelectedRoomId]);
+  }, [preSelectedRoomId]);
 
 
-  // Effect to run room loading when the selectedBuildingId changes
   useEffect(() => {
     if (selectedBuildingId) {
       loadRooms(selectedBuildingId);
@@ -138,10 +129,9 @@ export default function CreateTenantPage() {
 
     try {
       if (!selectedBuildingId || !selectedRoomId || !name.trim() || !monthlyRent || !monthlyMaintenance || !advancePaid) {
-        throw new Error("Please fill in all required fields (Building, Room, Name, Financials).");
+        throw new Error("Please fill in all required fields.");
       }
 
-      // Get building & room data needed for credentials and insertion
       const building = buildings.find((b) => b.id === selectedBuildingId);
       const room = rooms.find((r) => r.id === selectedRoomId);
 
@@ -149,13 +139,11 @@ export default function CreateTenantPage() {
         throw new Error("Invalid selection or missing building code.");
       }
 
-      // Generate Credentials
       const { username, password } = generateTenantCredentials(
         building.code, 
         room.room_number
       );
 
-      // Insert tenant
       const { error: insertError } = await supabase
         .from("tenants")
         .insert({
@@ -175,22 +163,18 @@ export default function CreateTenantPage() {
         .single();
 
       if (insertError) {
-        // Handle constraint violation if the room was occupied just before this submission
         if (insertError.code === "23505" || insertError.message.includes("is already linked")) {
-             throw new Error("This room was just occupied. Please refresh and select another room.");
+             throw new Error("This room was just occupied. Please refresh.");
         }
         throw insertError;
       }
       
-      // Update the room's occupied status (Good practice)
       await supabase.from("rooms").update({ is_occupied: true }).eq("id", selectedRoomId);
-
 
       setGeneratedUsername(username);
       setGeneratedPassword(password);
       setSuccess("Tenant created successfully.");
 
-      // Reset form fields
       setName("");
       setPhone("");
       setAgreementStart("");
@@ -198,11 +182,10 @@ export default function CreateTenantPage() {
       setMonthlyRent("");
       setMonthlyMaintenance("");
       setAdvancePaid("");
-      // Refresh the available rooms list after a successful creation
       loadRooms(selectedBuildingId); 
 
     } catch (err: any) {
-      setError(err.message || "Something went wrong. Check for console errors.");
+      setError(err.message || "Something went wrong.");
     } finally {
       setSaving(false);
     }
@@ -226,7 +209,6 @@ export default function CreateTenantPage() {
 
       <section className="bg-white rounded-xl shadow-sm p-3 text-sm">
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-          {/* Building */}
           <div className="flex flex-col gap-1">
             <label className="text-xs text-slate-600">Building *</label>
             <select
@@ -234,7 +216,6 @@ export default function CreateTenantPage() {
               value={selectedBuildingId}
               onChange={(e) => {
                 setSelectedBuildingId(e.target.value);
-                // loadRooms will handle resetting selectedRoomId
               }}
             >
               <option value="">Select building</option>
@@ -246,7 +227,6 @@ export default function CreateTenantPage() {
             </select>
           </div>
 
-          {/* Room */}
           <div className="flex flex-col gap-1">
             <label className="text-xs text-slate-600">Room *</label>
             <select
@@ -277,103 +257,45 @@ export default function CreateTenantPage() {
             )}
           </div>
 
-          {/* Tenant name */}
+          {/* ... Inputs for Name, Phone, Rent ... */}
           <div className="flex flex-col gap-1">
             <label className="text-xs text-slate-600">Tenant name *</label>
-            <input
-              className="border rounded-lg px-3 py-2 text-sm"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Full name"
-              required
-            />
+            <input className="border rounded-lg px-3 py-2 text-sm" value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name" required />
           </div>
-
-          {/* Phone */}
           <div className="flex flex-col gap-1">
             <label className="text-xs text-slate-600">Phone</label>
-            <input
-              className="border rounded-lg px-3 py-2 text-sm"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              placeholder="Phone number"
-            />
+            <input className="border rounded-lg px-3 py-2 text-sm" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone" />
           </div>
 
-          {/* Agreement dates */}
           <div className="grid grid-cols-2 gap-2">
             <div className="flex flex-col gap-1">
-              <label className="text-xs text-slate-600">
-                Agreement start date
-              </label>
-              <input
-                type="date"
-                className="border rounded-lg px-3 py-2 text-sm"
-                value={agreementStart}
-                onChange={(e) => setAgreementStart(e.target.value)}
-              />
+              <label className="text-xs text-slate-600">Start Date</label>
+              <input type="date" className="border rounded-lg px-3 py-2 text-sm" value={agreementStart} onChange={(e) => setAgreementStart(e.target.value)} />
             </div>
             <div className="flex flex-col gap-1">
-              <label className="text-xs text-slate-600">
-                Agreement end date
-              </label>
-              <input
-                type="date"
-                className="border rounded-lg px-3 py-2 text-sm"
-                value={agreementEnd}
-                onChange={(e) => setAgreementEnd(e.target.value)}
-              />
+              <label className="text-xs text-slate-600">End Date</label>
+              <input type="date" className="border rounded-lg px-3 py-2 text-sm" value={agreementEnd} onChange={(e) => setAgreementEnd(e.target.value)} />
             </div>
           </div>
 
-          {/* Money fields */}
           <div className="grid grid-cols-2 gap-2">
             <div className="flex flex-col gap-1">
-              <label className="text-xs text-slate-600">
-                Monthly rent (₹) *
-              </label>
-              <input
-                type="number"
-                className="border rounded-lg px-3 py-2 text-sm"
-                value={monthlyRent}
-                onChange={(e) => setMonthlyRent(e.target.value)}
-                min={0}
-                required
-              />
+              <label className="text-xs text-slate-600">Monthly Rent (₹) *</label>
+              <input type="number" className="border rounded-lg px-3 py-2 text-sm" value={monthlyRent} onChange={(e) => setMonthlyRent(e.target.value)} min={0} required />
             </div>
             <div className="flex flex-col gap-1">
-              <label className="text-xs text-slate-600">
-                Monthly maintenance (₹) *
-              </label>
-              <input
-                type="number"
-                className="border rounded-lg px-3 py-2 text-sm"
-                value={monthlyMaintenance}
-                onChange={(e) => setMonthlyMaintenance(e.target.value)}
-                min={0}
-                required
-              />
+              <label className="text-xs text-slate-600">Maintenance (₹) *</label>
+              <input type="number" className="border rounded-lg px-3 py-2 text-sm" value={monthlyMaintenance} onChange={(e) => setMonthlyMaintenance(e.target.value)} min={0} required />
             </div>
           </div>
 
           <div className="flex flex-col gap-1">
-            <label className="text-xs text-slate-600">Advance paid (₹) *</label>
-            <input
-              type="number"
-              className="border rounded-lg px-3 py-2 text-sm"
-              value={advancePaid}
-              onChange={(e) => setAdvancePaid(e.target.value)}
-              min={0}
-              required
-            />
+            <label className="text-xs text-slate-600">Advance Paid (₹) *</label>
+            <input type="number" className="border rounded-lg px-3 py-2 text-sm" value={advancePaid} onChange={(e) => setAdvancePaid(e.target.value)} min={0} required />
           </div>
 
-          {error && (
-            <p className="text-[11px] text-red-600 mt-1">{error}</p>
-          )}
-          {success && (
-            <p className="text-[11px] text-green-600 mt-1">{success}</p>
-          )}
+          {error && <p className="text-[11px] text-red-600 mt-1">{error}</p>}
+          {success && <p className="text-[11px] text-green-600 mt-1">{success}</p>}
 
           <button
             type="submit"
@@ -385,13 +307,9 @@ export default function CreateTenantPage() {
         </form>
       </section>
 
-      {/* Generated credentials */}
       {generatedUsername && generatedPassword && (
         <section className="bg-white rounded-xl shadow-sm p-3 text-sm">
           <h2 className="font-semibold mb-2">Login details</h2>
-          <p className="text-xs text-slate-500 mb-2">
-            Share these with the tenant so they can log in.
-          </p>
           <div className="flex flex-col gap-1">
             <div className="flex justify-between">
               <span className="text-xs text-slate-600">Username</span>
@@ -405,5 +323,15 @@ export default function CreateTenantPage() {
         </section>
       )}
     </div>
+  );
+}
+
+// 2. Export the Page Component wrapping the Content in Suspense
+export default function CreateTenantPage() {
+  return (
+    // The fallback UI is shown while the search params are being loaded
+    <Suspense fallback={<div className="p-4 text-sm">Loading form...</div>}>
+      <CreateTenantContent />
+    </Suspense>
   );
 }

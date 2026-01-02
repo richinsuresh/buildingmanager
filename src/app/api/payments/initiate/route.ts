@@ -1,19 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
 
-// NOTE: You must set the STRIPE_SECRET_KEY and NEXT_PUBLIC_BASE_URL environment variables.
-// FIX: Removed invalid 'apiVersion' override. SDK v20 should use its default (latest) API version.
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string);
+// FIX: Do NOT initialize Stripe globally here.
+// It causes build errors because the API Key isn't available during "npm run build".
 
-// Placeholder function: In a real app, fetch the tenant's actual email from Supabase
+// Helper to get tenant email (Mock or DB fetch)
 async function getTenantEmail(tenantId: string) {
-    // Replace this with actual Supabase query
     return `tenant-${tenantId.slice(0, 4)}@example.com`;
 }
 
-// Handler for POST requests (called by the "Pay Now" button form)
 export async function POST(req: NextRequest) {
   try {
+    // 1. Initialize Stripe INSIDE the handler (Lazy Load)
+    if (!process.env.STRIPE_SECRET_KEY) {
+      console.error("Missing STRIPE_SECRET_KEY env variable");
+      return NextResponse.json({ error: 'Server misconfiguration: Missing Payment Key' }, { status: 500 });
+    }
+
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+       // Optional: explicit API version if needed, otherwise defaults to latest
+       // apiVersion: '2025-01-27.acacia', 
+    });
+
     const formData = await req.formData();
     const tenantId = formData.get('tenantId')?.toString();
     const amountStr = formData.get('amount')?.toString();
@@ -27,17 +35,17 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'Invalid payment amount' }, { status: 400 });
     }
 
-    // Convert to the smallest currency unit (cents/paisa).
+    // Convert to cents/paisa
     const amountInCents = Math.round(amount * 100); 
     const tenantEmail = await getTenantEmail(tenantId);
     
-    // Create Stripe Checkout Session
+    // 2. Create Stripe Checkout Session
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       line_items: [
         {
           price_data: {
-            currency: 'inr', // Based on your usage of ₹
+            currency: 'inr', 
             product_data: {
               name: `Monthly Rent Payment`,
             },
@@ -47,8 +55,9 @@ export async function POST(req: NextRequest) {
         },
       ],
       mode: 'payment',
-      success_url: `${process.env.NEXT_PUBLIC_BASE_URL}/tenant/dashboard?payment=success`, 
-      cancel_url: `${process.env.NEXT_PUBLIC_BASE_URL}/tenant/dashboard?payment=cancelled`,
+      // Ensure NEXT_PUBLIC_BASE_URL is set, otherwise default to localhost for safety
+      success_url: `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/tenant/dashboard?payment=success`, 
+      cancel_url: `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/tenant/dashboard?payment=cancelled`,
       customer_email: tenantEmail,
       metadata: {
         tenantId: tenantId,
@@ -60,11 +69,10 @@ export async function POST(req: NextRequest) {
       throw new Error("Failed to create Stripe session URL");
     }
 
-    // Redirect user to Stripe Checkout
     return NextResponse.redirect(session.url, 303);
     
-  } catch (error) {
+  } catch (error: any) {
     console.error('Stripe Checkout Error:', error);
-    return NextResponse.json({ error: 'Failed to initiate payment. Check server logs.' }, { status: 500 });
+    return NextResponse.json({ error: error.message || 'Payment initiation failed' }, { status: 500 });
   }
 }
