@@ -6,8 +6,6 @@ import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
 import type { TenantDocument } from "@/lib/types";
 
-// NOTE: You will need to create a Storage Bucket in your Supabase project (e.g., 'tenant-docs') 
-// and set up Row Level Security (RLS) policies for security.
 const STORAGE_BUCKET = "tenant-docs";
 
 export default function TenantDocumentsPage() {
@@ -20,6 +18,9 @@ export default function TenantDocumentsPage() {
   const [error, setError] = useState("");
   const [label, setLabel] = useState("");
   const [file, setFile] = useState<File | null>(null);
+
+  // --- Preview State ---
+  const [previewDoc, setPreviewDoc] = useState<TenantDocument | null>(null);
 
   // --- Fetch Logic ---
   const fetchDocuments = useCallback(async () => {
@@ -53,50 +54,42 @@ export default function TenantDocumentsPage() {
     setError("");
 
     try {
-      const filePath = `${tenantId}/${Date.now()}_${file.name}`;
+      // Sanitize file name to avoid issues
+      const sanitizedName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
+      const filePath = `${tenantId}/${Date.now()}_${sanitizedName}`;
       
-      // 1. Upload file to Supabase Storage
       const { error: uploadError } = await supabase.storage
         .from(STORAGE_BUCKET)
         .upload(filePath, file);
 
-      if (uploadError) {
-        throw uploadError;
-      }
+      if (uploadError) throw uploadError;
 
-      // 2. Get the public URL for the file
       const { data: publicUrlData } = supabase.storage
         .from(STORAGE_BUCKET)
         .getPublicUrl(filePath);
 
-      if (!publicUrlData.publicUrl) {
-          throw new Error("Failed to get public URL.");
-      }
+      if (!publicUrlData.publicUrl) throw new Error("Failed to get public URL.");
 
-      // 3. Insert record into the database table
       const { error: insertError } = await supabase
         .from("tenant_documents")
         .insert({
           tenant_id: tenantId,
           url: publicUrlData.publicUrl,
-          file_name: file.name,
+          file_name: file.name, // Ensure your DB has this column, or remove if not
           label: label || file.name,
         });
 
       if (insertError) {
-        // If DB insertion fails, try to remove the file from storage (cleanup)
         await supabase.storage.from(STORAGE_BUCKET).remove([filePath]);
         throw insertError;
       }
 
-      // Success
       setLabel("");
       setFile(null);
       await fetchDocuments();
       
     } catch (err: any) {
       setError(err.message || "File upload failed.");
-      console.error(err);
     } finally {
       setUploading(false);
     }
@@ -104,31 +97,30 @@ export default function TenantDocumentsPage() {
 
   // --- Delete Logic ---
   const handleDelete = async (doc: TenantDocument) => {
-    if (!confirm(`Are you sure you want to delete the document: ${doc.label}?`)) return;
+    if (!confirm(`Are you sure you want to delete: ${doc.label}?`)) return;
 
     setLoading(true);
-    setError("");
-
     try {
-      // 1. Delete record from the database
-      const { error: deleteDbError } = await supabase
+      const { error: deleteError } = await supabase
         .from("tenant_documents")
         .delete()
         .eq("id", doc.id);
 
-      if (deleteDbError) throw deleteDbError;
-      
-      // NOTE: Deleting the file from Supabase storage is complex
-      // as the public URL does not contain the path, but is necessary for cleanup.
-      // We rely on the DB record being deleted for now.
-
-      // Success
+      if (deleteError) throw deleteError;
       await fetchDocuments();
     } catch (err: any) {
-      setError(err.message || "Failed to delete document.");
+      setError(err.message);
     } finally {
       setLoading(false);
     }
+  };
+
+  // --- Helper to check file type ---
+  const getFileType = (url: string) => {
+    const extension = url.split('.').pop()?.toLowerCase();
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(extension || '')) return 'image';
+    if (extension === 'pdf') return 'pdf';
+    return 'other';
   };
 
   return (
@@ -136,9 +128,9 @@ export default function TenantDocumentsPage() {
       <header className="flex items-center justify-between border-b pb-4">
         <Link
           href={`/management/tenant/${tenantId}`}
-          className="text-xs text-zinc-600"
+          className="text-xs text-zinc-600 hover:text-zinc-900"
         >
-          ← Back to Tenant Details
+          ← Back to Tenant
         </Link>
         <h1 className="text-xl font-semibold text-zinc-900">
           Manage Documents
@@ -148,69 +140,69 @@ export default function TenantDocumentsPage() {
 
       {error && <p className="text-sm text-red-600 rounded p-2 bg-red-50">Error: {error}</p>}
 
-      {/* --- Upload Form --- */}
-      <section className="rounded-xl bg-white p-4 shadow-sm space-y-4">
-        <h2 className="text-sm font-semibold text-zinc-700">Upload New Document</h2>
-        <form onSubmit={handleUpload} className="space-y-3">
-          <div>
-            <label className="block text-xs font-medium text-zinc-500">
-              Document Label
-            </label>
+      {/* Upload Form */}
+      <section className="rounded-xl bg-white p-4 shadow-sm border border-zinc-200">
+        <h2 className="text-sm font-semibold text-zinc-700 mb-3">Upload Document</h2>
+        <form onSubmit={handleUpload} className="flex gap-3 items-end">
+          <div className="flex-1">
+            <label className="block text-xs font-medium text-zinc-500 mb-1">Label</label>
             <input
               type="text"
               value={label}
               onChange={(e) => setLabel(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-zinc-500"
-              placeholder="e.g., Lease Agreement 2024"
+              className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
+              placeholder="e.g. Lease Agreement"
             />
           </div>
-          <div>
-            <label className="block text-xs font-medium text-zinc-500">
-              Select File *
-            </label>
-            <input
+          <div className="flex-1">
+             <label className="block text-xs font-medium text-zinc-500 mb-1">File</label>
+             <input
               type="file"
               onChange={(e) => setFile(e.target.files ? e.target.files[0] : null)}
-              className="mt-1 w-full text-sm text-zinc-600 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-zinc-50 file:text-zinc-700 hover:file:bg-zinc-100"
+              className="w-full text-sm text-zinc-500 file:mr-2 file:py-2 file:px-3 file:rounded-md file:border-0 file:text-xs file:bg-zinc-100 file:text-zinc-700 hover:file:bg-zinc-200"
               required
             />
           </div>
           <button
             type="submit"
             disabled={uploading || !file}
-            className="w-full rounded-lg bg-zinc-900 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50 transition-colors"
+            className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50"
           >
-            {uploading ? "Uploading..." : "Upload Document"}
+            {uploading ? "..." : "Upload"}
           </button>
         </form>
       </section>
 
-      {/* --- Document List --- */}
-      <section className="rounded-xl bg-white p-4 shadow-sm space-y-4">
-        <h2 className="text-sm font-semibold text-zinc-700">Existing Documents</h2>
+      {/* Document List */}
+      <section className="rounded-xl bg-white p-4 shadow-sm border border-zinc-200">
+        <h2 className="text-sm font-semibold text-zinc-700 mb-3">Stored Documents</h2>
         {loading ? (
-          <p className="text-sm text-zinc-500">Loading documents...</p>
+          <p className="text-sm text-zinc-400">Loading...</p>
         ) : documents.length === 0 ? (
-          <p className="text-sm text-zinc-500">No documents uploaded.</p>
+          <p className="text-sm text-zinc-400 italic">No documents found.</p>
         ) : (
-          <ul className="space-y-3">
+          <ul className="space-y-0 divide-y divide-zinc-100">
             {documents.map((doc) => (
-              <li key={doc.id} className="flex justify-between items-center border-b pb-2 last:border-b-0">
-                <div className="max-w-[70%]">
-                  <p className="text-sm font-medium">{doc.label}</p>
-                  <p className="text-[10px] text-zinc-400 truncate">
-                    Uploaded: {new Date(doc.created_at).toLocaleDateString()}
-                  </p>
+              <li key={doc.id} className="flex justify-between items-center py-3">
+                <div className="flex items-center gap-3">
+                  <div className="h-8 w-8 rounded-full bg-blue-50 flex items-center justify-center text-blue-600">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-zinc-900">{doc.label}</p>
+                    <p className="text-[10px] text-zinc-500">{new Date(doc.created_at).toLocaleDateString()}</p>
+                  </div>
                 </div>
-                <div className="flex gap-3 items-center">
-                  <a
-                    href={doc.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-xs text-blue-600 hover:underline"
+                <div className="flex items-center gap-3">
+                  {/* PREVIEW BUTTON */}
+                  <button
+                    onClick={() => setPreviewDoc(doc)}
+                    className="text-xs font-medium text-blue-600 hover:text-blue-800 hover:underline"
                   >
-                    View
-                  </a>
+                    Preview
+                  </button>
                   <button
                     onClick={() => handleDelete(doc)}
                     className="text-xs text-red-500 hover:text-red-700"
@@ -223,6 +215,58 @@ export default function TenantDocumentsPage() {
           </ul>
         )}
       </section>
+
+      {/* --- PREVIEW MODAL --- */}
+      {previewDoc && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+          <div className="relative w-full max-w-4xl rounded-xl bg-white shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b px-4 py-3 bg-zinc-50">
+              <h3 className="text-sm font-semibold text-zinc-900">{previewDoc.label}</h3>
+              <div className="flex gap-2">
+                 <a 
+                   href={previewDoc.url} 
+                   download 
+                   target="_blank"
+                   className="text-xs bg-zinc-200 hover:bg-zinc-300 px-3 py-1 rounded-md text-zinc-800"
+                 >
+                   Download
+                 </a>
+                 <button
+                   onClick={() => setPreviewDoc(null)}
+                   className="text-xs bg-zinc-800 hover:bg-zinc-900 px-3 py-1 rounded-md text-white"
+                 >
+                   Close
+                 </button>
+              </div>
+            </div>
+
+            {/* Modal Content */}
+            <div className="flex-1 overflow-auto bg-zinc-100 p-4 flex items-center justify-center">
+               {getFileType(previewDoc.url) === 'image' ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img 
+                    src={previewDoc.url} 
+                    alt={previewDoc.label} 
+                    className="max-w-full max-h-[80vh] object-contain shadow-lg rounded-md" 
+                  />
+               ) : getFileType(previewDoc.url) === 'pdf' ? (
+                  <iframe 
+                    src={previewDoc.url} 
+                    className="w-full h-[70vh] rounded-md shadow-sm border border-zinc-200" 
+                    title="Document Preview"
+                  />
+               ) : (
+                  <div className="text-center">
+                    <p className="text-zinc-500 mb-2">Preview not available for this file type.</p>
+                    <a href={previewDoc.url} target="_blank" className="text-blue-600 underline text-sm">Download to view</a>
+                  </div>
+               )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

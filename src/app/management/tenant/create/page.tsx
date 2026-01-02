@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, FormEvent, useCallback, Suspense } from "react"; // Added Suspense
+import { useEffect, useState, FormEvent, useCallback, Suspense, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient"; 
 import Link from "next/link";
@@ -14,6 +14,7 @@ type Building = {
 type Room = {
   id: string;
   room_number: string;
+  isOccupied?: boolean;
 };
 
 function generateTenantCredentials(buildingCode: string, roomNumber: string) {
@@ -22,19 +23,22 @@ function generateTenantCredentials(buildingCode: string, roomNumber: string) {
   return { username, password };
 }
 
-// 1. Rename your main logic component (NOT exported default)
 function CreateTenantContent() {
   const searchParams = useSearchParams();
-  const preSelectedBuildingId = searchParams.get("buildingId");
-  const preSelectedRoomId = searchParams.get("roomId");
+  const paramBuildingId = searchParams.get("buildingId");
+  const paramRoomId = searchParams.get("roomId");
 
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [loadingBuildings, setLoadingBuildings] = useState(true);
   const [loadingRooms, setLoadingRooms] = useState(false);
 
-  const [selectedBuildingId, setSelectedBuildingId] = useState(preSelectedBuildingId || "");
-  const [selectedRoomId, setSelectedRoomId] = useState(preSelectedRoomId || "");
+  const [selectedBuildingId, setSelectedBuildingId] = useState("");
+  const [selectedRoomId, setSelectedRoomId] = useState("");
+
+  // Refs to handle race conditions and initialization
+  const isMounted = useRef(false);
+  const initialParamsHandled = useRef(false);
 
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -51,9 +55,10 @@ function CreateTenantContent() {
   const [generatedUsername, setGeneratedUsername] = useState("");
   const [generatedPassword, setGeneratedPassword] = useState("");
 
-  // Load buildings on mount
+  // 1. Load Buildings & Handle Initial URL Params
   useEffect(() => {
-    const loadBuildings = async () => {
+    const init = async () => {
+      isMounted.current = true;
       const { data, error } = await supabase
         .from("buildings")
         .select("id, name, code")
@@ -61,65 +66,92 @@ function CreateTenantContent() {
 
       if (error) {
         setError(error.message);
-      } else {
-        setBuildings((data || []) as Building[]);
+        setLoadingBuildings(false);
+        return;
       }
 
+      const fetchedBuildings = (data || []) as Building[];
+      setBuildings(fetchedBuildings);
       setLoadingBuildings(false);
-    };
-    loadBuildings();
-  }, []);
 
-  // Memoized function to load rooms
-  const loadRooms = useCallback(async (currentBuildingId: string) => {
-    if (!currentBuildingId) {
-        setRooms([]);
-        setSelectedRoomId("");
-        return;
-    }
-    setLoadingRooms(true);
-    setError("");
-
-    // 1. Get all occupied room IDs
-    const { data: occupiedTenants } = await supabase
-        .from("tenants")
-        .select("room_id")
-        .eq("building_id", currentBuildingId);
+      // Handle URL Parameters (Run only once)
+      if (!initialParamsHandled.current && paramBuildingId) {
+        // Try to find building by ID first, then by Code
+        const matched = fetchedBuildings.find(
+          b => b.id === paramBuildingId || b.code === paramBuildingId
+        );
         
-    const occupiedRoomIds = occupiedTenants?.map((t: any) => t.room_id) || [];
-
-    // 2. Get all rooms
-    const { data: allRooms, error: roomsError } = await supabase
-        .from("rooms")
-        .select("id, room_number")
-        .eq("building_id", currentBuildingId)
-        .order("room_number", { ascending: true });
-
-    if (roomsError) {
-        setError(roomsError.message);
-        setRooms([]);
-    } else {
-        const unoccupiedRooms = (allRooms || []).filter((room: any) => !occupiedRoomIds.includes(room.id));
-        setRooms(unoccupiedRooms as Room[]);
-
-        const isPreSelectedRoomAvailable = unoccupiedRooms.some((r: any) => r.id === preSelectedRoomId);
-
-        if (preSelectedRoomId && isPreSelectedRoomAvailable) {
-            setSelectedRoomId(preSelectedRoomId);
-        } else {
-            setSelectedRoomId("");
+        if (matched) {
+          setSelectedBuildingId(matched.id);
+          // If we have a room ID too, set it (validation happens in loadRooms)
+          if (paramRoomId) {
+            setSelectedRoomId(paramRoomId);
+          }
         }
-    }
-    setLoadingRooms(false);
-  }, [preSelectedRoomId]);
+        initialParamsHandled.current = true;
+      }
+    };
 
+    init();
+    return () => { isMounted.current = false; };
+  }, [paramBuildingId, paramRoomId]);
 
+  // 2. Load Rooms (with Race Condition Protection)
   useEffect(() => {
-    if (selectedBuildingId) {
-      loadRooms(selectedBuildingId);
-    }
-  }, [selectedBuildingId, loadRooms]);
+    let active = true; // Flag to prevent race conditions
 
+    const fetchRooms = async () => {
+      if (!selectedBuildingId) {
+        setRooms([]);
+        return;
+      }
+
+      setLoadingRooms(true);
+      setError("");
+      // Clear rooms immediately to prevent showing wrong building's rooms
+      setRooms([]); 
+
+      try {
+        // A. Get occupied room IDs for this building
+        const { data: occupiedTenants } = await supabase
+            .from("tenants")
+            .select("room_id")
+            .eq("building_id", selectedBuildingId);
+            
+        const occupiedRoomIds = occupiedTenants?.map((t: any) => t.room_id) || [];
+
+        // B. Get all rooms for this building
+        const { data: allRooms, error: roomsError } = await supabase
+            .from("rooms")
+            .select("id, room_number")
+            .eq("building_id", selectedBuildingId)
+            .order("room_number", { ascending: true });
+
+        if (!active) return; // If component unmounted or ID changed, stop
+
+        if (roomsError) {
+            console.error("Room fetch error:", roomsError);
+            setError(roomsError.message);
+        } else {
+            // Map to include status
+            const processedRooms = (allRooms || []).map((room: any) => ({
+                id: room.id,
+                room_number: room.room_number,
+                isOccupied: occupiedRoomIds.includes(room.id)
+            }));
+            setRooms(processedRooms);
+        }
+      } catch (err: any) {
+         if (active) setError(err.message);
+      } finally {
+         if (active) setLoadingRooms(false);
+      }
+    };
+
+    fetchRooms();
+
+    return () => { active = false; }; // Cleanup function
+  }, [selectedBuildingId]);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -163,8 +195,8 @@ function CreateTenantContent() {
         .single();
 
       if (insertError) {
-        if (insertError.code === "23505" || insertError.message.includes("is already linked")) {
-             throw new Error("This room was just occupied. Please refresh.");
+        if (insertError.code === "23505") {
+             throw new Error("Error: This room (or username) is already taken.");
         }
         throw insertError;
       }
@@ -182,7 +214,12 @@ function CreateTenantContent() {
       setMonthlyRent("");
       setMonthlyMaintenance("");
       setAdvancePaid("");
-      loadRooms(selectedBuildingId); 
+      
+      // Force refresh rooms to update occupancy status
+      // We toggle selectedBuildingId briefly or just re-run the logic? 
+      // Safest is to just manually re-trigger the effect logic logic or separate it.
+      // Ideally, we just update the local state to reflect the change immediately:
+      setRooms(prev => prev.map(r => r.id === selectedRoomId ? { ...r, isOccupied: true } : r));
 
     } catch (err: any) {
       setError(err.message || "Something went wrong.");
@@ -191,7 +228,7 @@ function CreateTenantContent() {
     }
   };
 
-  if (loadingBuildings) return <p>Loading buildings...</p>;
+  if (loadingBuildings) return <p className="text-sm p-4">Loading buildings...</p>;
 
   return (
     <div className="flex flex-col gap-4">
@@ -209,6 +246,7 @@ function CreateTenantContent() {
 
       <section className="bg-white rounded-xl shadow-sm p-3 text-sm">
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+          {/* BUILDING SELECT */}
           <div className="flex flex-col gap-1">
             <label className="text-xs text-slate-600">Building *</label>
             <select
@@ -216,6 +254,7 @@ function CreateTenantContent() {
               value={selectedBuildingId}
               onChange={(e) => {
                 setSelectedBuildingId(e.target.value);
+                setSelectedRoomId(""); // Reset room when building changes
               }}
             >
               <option value="">Select building</option>
@@ -227,6 +266,7 @@ function CreateTenantContent() {
             </select>
           </div>
 
+          {/* ROOM SELECT */}
           <div className="flex flex-col gap-1">
             <label className="text-xs text-slate-600">Room *</label>
             <select
@@ -241,23 +281,27 @@ function CreateTenantContent() {
                   : !selectedBuildingId
                   ? "Select building first"
                   : rooms.length === 0
-                  ? "No unoccupied rooms available"
+                  ? "No rooms available"
                   : "Select room"}
               </option>
               {rooms.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.room_number} (Unoccupied)
+                <option 
+                  key={r.id} 
+                  value={r.id}
+                  className={r.isOccupied ? "text-red-500 font-medium" : "text-zinc-900"}
+                >
+                  {r.room_number} {r.isOccupied ? "(Occupied)" : ""}
                 </option>
               ))}
             </select>
             {selectedBuildingId && rooms.length === 0 && !loadingRooms && (
                  <p className="text-[10px] text-red-500 mt-1">
-                    No available rooms. <Link href={`/management/buildings/${selectedBuildingId}/add-room`} className="underline">Add a new room?</Link>
+                    No available rooms in this building. <Link href={`/management/buildings/${selectedBuildingId}/add-room`} className="underline">Add a room?</Link>
                  </p>
             )}
           </div>
 
-          {/* ... Inputs for Name, Phone, Rent ... */}
+          {/* FORM FIELDS */}
           <div className="flex flex-col gap-1">
             <label className="text-xs text-slate-600">Tenant name *</label>
             <input className="border rounded-lg px-3 py-2 text-sm" value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name" required />
@@ -326,11 +370,9 @@ function CreateTenantContent() {
   );
 }
 
-// 2. Export the Page Component wrapping the Content in Suspense
 export default function CreateTenantPage() {
   return (
-    // The fallback UI is shown while the search params are being loaded
-    <Suspense fallback={<div className="p-4 text-sm">Loading form...</div>}>
+    <Suspense fallback={<div className="p-4 text-sm">Loading...</div>}>
       <CreateTenantContent />
     </Suspense>
   );
