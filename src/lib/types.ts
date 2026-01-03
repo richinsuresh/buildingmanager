@@ -13,7 +13,7 @@ export type Payment = {
   amount: number;
   paid_at: string;
   payment_month: string | null;
-  payment_type: "rent" | "deposit" | "maintenance" | "other" | string; // <--- NEW FIELD
+  payment_type: "rent" | "deposit" | "maintenance" | "other" | string;
   method: "online" | "cash" | "bank-transfer" | string;
   notes: string | null;
   created_at: string;
@@ -41,6 +41,7 @@ export type Tenant = {
   building_id: string;
   room_id: string;
   name: string;
+  status: "active" | "vacated" | string; // <--- NEW FIELD
   phone: string | null;
   username: string;
   password: string;
