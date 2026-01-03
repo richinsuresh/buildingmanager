@@ -54,7 +54,7 @@ export default function TenantDocumentsPage() {
     setError("");
 
     try {
-      // Sanitize file name to avoid issues
+      // Sanitize file name
       const sanitizedName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
       const filePath = `${tenantId}/${Date.now()}_${sanitizedName}`;
       
@@ -75,7 +75,7 @@ export default function TenantDocumentsPage() {
         .insert({
           tenant_id: tenantId,
           url: publicUrlData.publicUrl,
-          file_name: file.name, // Ensure your DB has this column, or remove if not
+          file_name: file.name, 
           label: label || file.name,
         });
 
@@ -196,7 +196,6 @@ export default function TenantDocumentsPage() {
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
-                  {/* PREVIEW BUTTON */}
                   <button
                     onClick={() => setPreviewDoc(doc)}
                     className="text-xs font-medium text-blue-600 hover:text-blue-800 hover:underline"
@@ -248,7 +247,7 @@ export default function TenantDocumentsPage() {
                   // eslint-disable-next-line @next/next/no-img-element
                   <img 
                     src={previewDoc.url} 
-                    alt={previewDoc.label} 
+                    alt={previewDoc.label || "Document Preview"} // FIX: Added fallback string
                     className="max-w-full max-h-[80vh] object-contain shadow-lg rounded-md" 
                   />
                ) : getFileType(previewDoc.url) === 'pdf' ? (
