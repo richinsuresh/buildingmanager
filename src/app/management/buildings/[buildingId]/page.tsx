@@ -3,44 +3,47 @@
 import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
 import type { Building, Tenant, Room, Payment } from "@/lib/types"; 
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState, useCallback } from "react";
 
-// Define the shape of the data needed for rendering
 type TenantDisplay = Tenant & { room_number: string; };
 
 export default function BuildingDetailPage() {
   const params = useParams();
+  const router = useRouter();
   const buildingId = params.buildingId as string;
 
   const [building, setBuilding] = useState<Building | null>(null);
   const [tenantList, setTenantList] = useState<TenantDisplay[]>([]);
   const [roomList, setRoomList] = useState<Room[]>([]);
-  const [payments, setPayments] = useState<Payment[]>([]); // New State for Payments
+  const [payments, setPayments] = useState<Payment[]>([]);
+  
+  // NEW: State for selected month (YYYY-MM)
+  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7));
+  
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [deletingRoomId, setDeletingRoomId] = useState<string | null>(null);
   
   const loadData = useCallback(async (id: string) => {
     setLoading(true);
     setError(null);
     
     try {
-        // 1. Fetch building details
+        // 1. Fetch building
         const { data: buildingRows } = await supabase
             .from("buildings")
             .select("*")
             .eq("id", id);
 
-        const fetchedBuilding = buildingRows?.[0] ?? null;
-
-        if (!fetchedBuilding) {
+        if (!buildingRows?.[0]) {
             setError("Building not found.");
             setLoading(false);
             return;
         }
-        setBuilding(fetchedBuilding as Building);
+        setBuilding(buildingRows[0] as Building);
 
-        // 2. Fetch tenants and rooms
+        // 2. Fetch tenants & rooms
         const [{ data: tenants }, { data: rooms }] = await Promise.all([
             supabase
                 .from("tenants")
@@ -62,23 +65,18 @@ export default function BuildingDetailPage() {
         setTenantList(processedTenants);
         setRoomList(rooms ?? []);
 
-        // 3. NEW: Fetch Payments for the Current Month
+        // 3. Fetch ALL payments for these tenants (Filtered in memory for flexibility)
+        // Note: For very large datasets, you would filter this in the SQL query.
         if (processedTenants.length > 0) {
-            const now = new Date();
-            const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-            const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString();
-            
-            // Get IDs of all tenants in this building
             const tenantIds = processedTenants.map(t => t.id);
-
-            const { data: currentPayments } = await supabase
+            const { data: allPayments } = await supabase
                 .from("payments")
                 .select("*")
-                .in("tenant_id", tenantIds)
-                .gte("paid_at", startOfMonth)
-                .lte("paid_at", endOfMonth);
+                .in("tenant_id", tenantIds);
             
-            setPayments(currentPayments || []);
+            setPayments(allPayments || []);
+        } else {
+            setPayments([]);
         }
 
     } catch (err: any) {
@@ -90,15 +88,48 @@ export default function BuildingDetailPage() {
   }, []);
 
   useEffect(() => {
-    if (buildingId) {
-        loadData(buildingId);
-    }
+    if (buildingId) loadData(buildingId);
   }, [buildingId, loadData]);
 
-  // --- Helper to calculate payment status ---
+  // --- Delete Room Function ---
+  const handleDeleteRoom = async (roomId: string, roomNumber: string) => {
+    if (!confirm(`Are you sure you want to delete Room ${roomNumber}?`)) return;
+    setDeletingRoomId(roomId);
+    try {
+        const { error } = await supabase.from("rooms").delete().eq("id", roomId);
+        if (error) throw error;
+        // Remove from local state immediately
+        setRoomList(prev => prev.filter(r => r.id !== roomId));
+    } catch (err: any) {
+        alert("Error deleting room: " + err.message);
+    } finally {
+        setDeletingRoomId(null);
+    }
+  };
+
+  // --- Helper: Payment Status for Selected Month ---
   const getPaymentStatus = (tenantId: string, rent: number, maintenance: number) => {
     const totalDue = rent + maintenance;
-    const tenantPayments = payments.filter(p => p.tenant_id === tenantId);
+    const targetMonthStr = `${selectedMonth}-01`; // YYYY-MM-01
+
+    // Filter payments for this tenant AND this month
+    const tenantPayments = payments.filter(p => {
+        if (p.tenant_id !== tenantId) return false;
+        
+        // 1. If explicit payment_month exists, match it
+        if (p.payment_month) {
+            return p.payment_month === targetMonthStr;
+        }
+        
+        // 2. Fallback: Check if paid_at is in the selected month
+        // (Only if payment_month is null, to support legacy data)
+        const paidDate = new Date(p.paid_at);
+        const pYear = paidDate.getFullYear();
+        const pMonth = String(paidDate.getMonth() + 1).padStart(2, '0');
+        const pMonthStr = `${pYear}-${pMonth}`;
+        return pMonthStr === selectedMonth;
+    });
+
     const totalPaid = tenantPayments.reduce((sum, p) => sum + p.amount, 0);
 
     if (totalPaid === 0) {
@@ -114,59 +145,64 @@ export default function BuildingDetailPage() {
     };
   };
 
-  if (loading) {
-    return <div className="min-h-screen px-4 py-6 text-sm text-zinc-500">Loading details...</div>;
-  }
-
-  if (error) {
-    return (
-        <div className="min-h-screen px-4 py-6">
-            <p className="text-sm text-red-600">{error}</p>
-            <Link href="/management/dashboard" className="mt-2 text-xs underline">← Back to dashboard</Link>
-        </div>
-    );
-  }
+  if (loading) return <div className="p-8 text-sm text-zinc-500">Loading...</div>;
+  if (error) return <div className="p-8 text-sm text-red-600">Error: {error}</div>;
   
   const tenantCount = tenantList.length;
   const roomCount = roomList.length;
   const totalMonthly = tenantList.reduce((sum, t: any) => sum + (t.rent ?? 0) + (t.maintenance ?? 0), 0) ?? 0;
 
   return (
-    <div className="space-y-6">
-      {/* Top bar */}
-      <header className="flex items-center justify-between">
+    <div className="space-y-6 pb-10">
+      {/* Header */}
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b pb-4">
         <div>
-          <p className="text-xs text-zinc-500 mb-1">
-            <Link href="/management/dashboard" className="underline hover:text-zinc-700">← Back to dashboard</Link>
-          </p>
-          <h1 className="text-2xl font-semibold text-zinc-900">{building!.name}</h1>
-          {building!.address && <p className="mt-1 text-sm text-zinc-600">{building!.address}</p>}
+          <Link href="/management/dashboard" className="text-xs text-zinc-500 hover:text-zinc-900 underline mb-1 block">
+            ← Back to Dashboard
+          </Link>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold text-zinc-900">{building!.name}</h1>
+            <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-bold text-zinc-600 border border-zinc-200">
+              {building!.code}
+            </span>
+          </div>
+          <p className="text-sm text-zinc-500">{building!.address}</p>
         </div>
-        <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-medium uppercase tracking-wide text-zinc-700">
-          {building!.code}
-        </span>
+
+        {/* MONTH SELECTOR */}
+        <div className="flex items-center gap-2 bg-zinc-50 p-2 rounded-lg border border-zinc-200">
+            <label className="text-xs font-medium text-zinc-500">View Month:</label>
+            <input 
+                type="month" 
+                value={selectedMonth}
+                onChange={(e) => setSelectedMonth(e.target.value)}
+                className="bg-white border border-zinc-300 rounded px-2 py-1 text-sm font-medium text-zinc-900 focus:outline-none focus:border-zinc-500"
+            />
+        </div>
       </header>
 
       {/* Stats */}
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <div className="rounded-xl bg-white p-4 shadow-sm border border-zinc-100">
-          <p className="text-xs text-zinc-500">Total Units</p>
-          <p className="mt-1 text-2xl font-semibold text-zinc-900">{roomCount}</p>
+          <p className="text-xs text-zinc-500 uppercase">Occupancy</p>
+          <p className="mt-1 text-2xl font-bold text-zinc-900">
+            {tenantCount} <span className="text-sm font-normal text-zinc-400">/ {roomCount}</span>
+          </p>
         </div>
         <div className="rounded-xl bg-white p-4 shadow-sm border border-zinc-100">
-          <p className="text-xs text-zinc-500">Monthly Potential</p>
-          <p className="mt-1 text-lg font-semibold text-zinc-900">₹{totalMonthly.toLocaleString()}</p>
+          <p className="text-xs text-zinc-500 uppercase">Est. Monthly Revenue</p>
+          <p className="mt-1 text-2xl font-bold text-zinc-900">₹{totalMonthly.toLocaleString()}</p>
         </div>
-        <div className="rounded-xl bg-white p-4 shadow-sm border border-zinc-100 flex flex-col justify-center gap-2">
+        <div className="flex flex-col gap-2">
           <Link
             href={`/management/buildings/${buildingId}/add-room`}
-            className="text-center rounded-md bg-zinc-100 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-200"
+            className="flex-1 flex items-center justify-center rounded-lg border border-zinc-200 bg-white text-xs font-bold text-zinc-700 hover:bg-zinc-50"
           >
-            + Add Room
+            + Create Room
           </Link>
            <Link
             href={`/management/tenant/create?buildingId=${buildingId}`}
-            className="text-center rounded-md bg-zinc-900 py-1.5 text-xs font-medium text-white hover:bg-zinc-800"
+            className="flex-1 flex items-center justify-center rounded-lg bg-zinc-900 text-xs font-bold text-white hover:bg-zinc-800"
           >
             + Add Tenant
           </Link>
@@ -174,76 +210,78 @@ export default function BuildingDetailPage() {
       </section>
 
       {/* Rooms List */}
-      <section className="space-y-3">
-        <div className="flex items-center justify-between">
-          <p className="text-sm font-medium text-zinc-700">Unit Status</p>
-          <p className="text-xs text-zinc-500">{tenantCount} occupied / {roomCount} total</p>
-        </div>
+      <section className="space-y-4">
+        <h2 className="text-lg font-bold text-zinc-900">
+            Room Status <span className="text-zinc-400 font-normal text-sm">({selectedMonth})</span>
+        </h2>
         
-        {roomList.length === 0 && (
-          <p className="text-xs text-zinc-500 italic">No rooms created yet.</p>
-        )}
+        {roomList.length === 0 ? (
+          <div className="text-center py-10 rounded-xl border border-dashed border-zinc-300">
+            <p className="text-sm text-zinc-500">No rooms yet.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-3">
+            {roomList.map((room) => {
+              const tenant = tenantList.find((t: any) => t.room_id === room.id);
+              const payInfo = tenant ? getPaymentStatus(tenant.id, tenant.rent, tenant.maintenance) : null;
 
-        <div className="grid grid-cols-1 gap-3">
-          {roomList.map((room) => {
-            const tenant = tenantList.find((t: any) => t.room_id === room.id);
-            // Calculate status if tenant exists
-            const payInfo = tenant 
-                ? getPaymentStatus(tenant.id, tenant.rent, tenant.maintenance) 
-                : null;
+              return (
+                <div 
+                  key={room.id}
+                  className={`group relative flex flex-col sm:flex-row sm:items-center justify-between rounded-xl border p-4 transition-all ${
+                    tenant ? "bg-white border-zinc-200" : "bg-zinc-50 border-dashed border-zinc-300"
+                  }`}
+                >
+                  {/* Clickable Area for Navigation */}
+                  <Link
+                    href={tenant ? `/management/tenant/${tenant.id}` : `/management/tenant/create?buildingId=${buildingId}&roomId=${room.id}`}
+                    className="flex-1 flex flex-col sm:flex-row sm:items-center gap-4"
+                  >
+                    <div className="flex items-center gap-3 min-w-[120px]">
+                        <span className="font-bold text-zinc-900 text-lg">{room.room_number}</span>
+                        {!tenant && <span className="px-2 py-0.5 rounded bg-zinc-200 text-[10px] uppercase font-bold text-zinc-500">Vacant</span>}
+                    </div>
 
-            return (
-              <Link
-                key={room.id}
-                href={tenant 
-                    ? `/management/tenant/${tenant.id}` 
-                    : `/management/tenant/create?buildingId=${buildingId}&roomId=${room.id}`
-                }
-                className={`group flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-xl p-4 border transition-all ${
-                  tenant
-                    ? "bg-white border-zinc-200 hover:border-zinc-300 hover:shadow-md"
-                    : "bg-zinc-50 border-dashed border-zinc-300 hover:border-zinc-400 hover:bg-zinc-100"
-                }`}
-              >
-                {/* Left Side: Room & Tenant Info */}
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-zinc-900">Room {room.room_number}</span>
-                    {!tenant && (
-                        <span className="text-[10px] uppercase font-bold text-zinc-400 bg-zinc-200 px-1.5 py-0.5 rounded">
-                            Vacant
-                        </span>
+                    {tenant && (
+                        <div className="flex-1">
+                            <p className="text-sm font-bold text-zinc-900">{tenant.name}</p>
+                            <p className="text-xs text-zinc-500">Rent: ₹{(tenant.rent + tenant.maintenance).toLocaleString()}</p>
+                        </div>
                     )}
-                  </div>
-                  
-                  <div className="mt-1">
-                    {tenant ? (
-                      <div>
-                        <p className="text-sm font-medium text-zinc-800 group-hover:text-blue-600">
-                            {tenant.name}
-                        </p>
-                        <p className="text-xs text-zinc-500 mt-0.5">
-                            Rent: ₹{(tenant.rent + tenant.maintenance).toLocaleString()}
-                        </p>
-                      </div>
-                    ) : (
-                      <span className="text-xs text-zinc-400 font-medium">+ Click to Assign Tenant</span>
+
+                    {/* Payment Status Badge */}
+                    {tenant && payInfo && (
+                        <div className={`mt-2 sm:mt-0 px-3 py-1 rounded-md text-xs font-bold border ${payInfo.color}`}>
+                            {payInfo.label}
+                        </div>
                     )}
-                  </div>
+                  </Link>
+
+                  {/* Delete Room Button (Only if Vacant) */}
+                  {!tenant && (
+                      <button
+                        onClick={(e) => {
+                            e.stopPropagation(); // Prevent navigation
+                            handleDeleteRoom(room.id, room.room_number);
+                        }}
+                        disabled={deletingRoomId === room.id}
+                        className="absolute top-4 right-4 sm:static sm:ml-4 p-2 text-zinc-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors"
+                        title="Delete Room"
+                      >
+                        {deletingRoomId === room.id ? (
+                            <span className="text-[10px]">...</span>
+                        ) : (
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                        )}
+                      </button>
+                  )}
                 </div>
-
-                {/* Right Side: Payment Status */}
-                {tenant && payInfo && (
-                  <div className="flex items-center justify-between sm:justify-end w-full sm:w-auto mt-2 sm:mt-0 pt-2 sm:pt-0 border-t sm:border-0 border-zinc-100">
-                     <div className={`px-3 py-1.5 rounded-lg border text-xs font-semibold ${payInfo.color}`}>
-                        {payInfo.label}
-                     </div>
-                  </div>
-                )}
-              </Link>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
       </section>
     </div>
   );

@@ -18,9 +18,12 @@ export default function QuickPaymentModal({ buildings, tenants }: QuickPaymentPr
   const [selectedTenantId, setSelectedTenantId] = useState("");
   const [amount, setAmount] = useState("");
   const [datePaid, setDatePaid] = useState(new Date().toISOString().split("T")[0]);
-  // Default to current month (YYYY-MM format for input type="month")
   const [forMonth, setForMonth] = useState(new Date().toISOString().slice(0, 7));
   const [method, setMethod] = useState("cash");
+  
+  // Payment Type State
+  const [paymentType, setPaymentType] = useState("rent");
+  
   const [notes, setNotes] = useState("");
   
   const [loading, setLoading] = useState(false);
@@ -40,7 +43,6 @@ export default function QuickPaymentModal({ buildings, tenants }: QuickPaymentPr
         throw new Error("Please select a tenant and enter an amount.");
       }
 
-      // Append -01 to make it a valid date for the DB (YYYY-MM-01)
       const paymentMonthDate = forMonth ? `${forMonth}-01` : null;
 
       const { error: insertError } = await supabase.from("payments").insert({
@@ -48,7 +50,8 @@ export default function QuickPaymentModal({ buildings, tenants }: QuickPaymentPr
         amount: Number(amount),
         method: method,
         paid_at: datePaid,
-        payment_month: paymentMonthDate, // <--- Saving the month
+        payment_month: paymentMonthDate,
+        payment_type: paymentType,
         notes: notes || null,
       });
 
@@ -58,8 +61,8 @@ export default function QuickPaymentModal({ buildings, tenants }: QuickPaymentPr
       setAmount("");
       setNotes("");
       setMethod("cash");
+      setPaymentType("rent");
       setSelectedTenantId("");
-      // Reset to current month
       setForMonth(new Date().toISOString().slice(0, 7));
       
       router.refresh();
@@ -139,7 +142,7 @@ export default function QuickPaymentModal({ buildings, tenants }: QuickPaymentPr
                 </select>
               </div>
 
-              {/* Amount & Date */}
+              {/* Amount & Type */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-zinc-500">Amount (₹)</label>
@@ -154,6 +157,21 @@ export default function QuickPaymentModal({ buildings, tenants }: QuickPaymentPr
                   />
                 </div>
                 <div>
+                  <label className="block text-xs font-medium text-zinc-500">Type</label>
+                  <select
+                    value={paymentType}
+                    onChange={(e) => setPaymentType(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm"
+                  >
+                    <option value="rent">Rent (inc. Maint.)</option>
+                    <option value="deposit">Deposit</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Date & Month */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
                   <label className="block text-xs font-medium text-zinc-500">Paid On</label>
                   <input
                     type="date"
@@ -163,11 +181,8 @@ export default function QuickPaymentModal({ buildings, tenants }: QuickPaymentPr
                     required
                   />
                 </div>
-              </div>
-
-              {/* Month Selection (NEW) */}
-              <div>
-                  <label className="block text-xs font-medium text-zinc-500">Paying Rent For Month</label>
+                <div>
+                  <label className="block text-xs font-medium text-zinc-500">For Month</label>
                   <input
                     type="month"
                     value={forMonth}
@@ -175,6 +190,7 @@ export default function QuickPaymentModal({ buildings, tenants }: QuickPaymentPr
                     className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm"
                     required
                   />
+                </div>
               </div>
 
               {/* Method & Notes */}

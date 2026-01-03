@@ -12,7 +12,8 @@ export type Payment = {
   tenant_id: string;
   amount: number;
   paid_at: string;
-  payment_month: string | null; // <--- NEW FIELD
+  payment_month: string | null;
+  payment_type: "rent" | "deposit" | "maintenance" | "other" | string; // <--- NEW FIELD
   method: "online" | "cash" | "bank-transfer" | string;
   notes: string | null;
   created_at: string;
