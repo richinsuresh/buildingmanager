@@ -12,6 +12,7 @@ export type Payment = {
   tenant_id: string;
   amount: number;
   paid_at: string;
+  payment_month: string | null; // <--- NEW FIELD
   method: "online" | "cash" | "bank-transfer" | string;
   notes: string | null;
   created_at: string;
@@ -22,7 +23,7 @@ export type TenantDocument = {
   tenant_id: string;
   url: string;
   label: string | null;
-  file_name?: string | null; // <--- ADD THIS LINE
+  file_name?: string | null;
   created_at: string;
 };
 
