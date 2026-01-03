@@ -395,7 +395,7 @@ export default function TenantDetailPage() {
             </form>
           )}
 
-          {/* --- NEW: Image Preview Grid --- */}
+          {/* --- Image Preview Grid (Fixed) --- */}
           <section className="rounded-xl bg-white p-5 shadow-sm border border-zinc-200">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-semibold text-zinc-700">Documents Gallery</h3>
@@ -420,7 +420,7 @@ export default function TenantDetailPage() {
                    {/* eslint-disable-next-line @next/next/no-img-element */}
                    <img 
                       src={doc.url} 
-                      alt={doc.label} 
+                      alt={doc.label || "Document"}  // FIX: Added fallback string
                       className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
                    />
                    <div className="absolute bottom-0 inset-x-0 bg-black/60 p-2 opacity-0 group-hover:opacity-100 transition-opacity">
